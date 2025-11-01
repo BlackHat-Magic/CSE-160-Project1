@@ -12,6 +12,7 @@
 #include "includes/CommandMsg.h"
 #include "includes/sendInfo.h"
 #include "includes/channels.h"
+// #include "dataStructures/interfaces/Hashmap.nc"
 
 module Node{
    uses interface Boot;
@@ -27,7 +28,8 @@ module Node{
    uses interface AMPacket;
    uses interface Timer<TMilli> as periodicTimer;
 
-   // uint16_t nextseq = 1;
+   // key: src    value: last seq
+   uses interface Hashmap<uint16_t> as SeqMap;
 }
 
 implementation{
@@ -75,13 +77,31 @@ implementation{
    event void AMControl.stopDone(error_t err){}
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
+      uint16_t src, seq, last;
+
       dbg(GENERAL_CHANNEL, "Packet Received\n");
-      if(len==sizeof(pack)){
-         pack* myMsg=(pack*) payload;
-         dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+      if (len != sizeof (pack)) {
+         dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);
+         return msg;
+      };
+      
+      src = p->src;
+      seq = p->seq;
+
+      if (!call SeqMap.contains(src)) {
+         call SeqMap.insert(src, seq);
+         dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (not seen before)\n", src, seq);
          return msg;
       }
-      dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);
+
+      last = call SeqMap.get(src);
+      if (seq <= last) {
+         dbg(FLOODING_CHANNEL, "DUP from %u seq=%u (last %u); drop\n", src, seq, last)
+      } else {
+         call SeqMap.insert(src, seq);
+         dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (was %u)\n", src, seq, last);
+      }
+
       return msg;
    }
 

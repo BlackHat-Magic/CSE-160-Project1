@@ -36,4 +36,8 @@ implementation {
     // Periodic timer for neighbor discovery
     components new TimerMilliC() as NDTimerC;
     Node.periodicTimer -> NDTimerC;
+
+    //  Key: Src    Value: Last Seq
+    components new HashMapC(uint16_t, 256) as SeqMapC;
+    Node.SeqMap -> SeqMapC;
 }

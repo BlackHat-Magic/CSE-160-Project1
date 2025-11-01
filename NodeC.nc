@@ -25,9 +25,15 @@ implementation {
     components ActiveMessageC;
     Node.AMControl -> ActiveMessageC;
 
+    Node.AMPacket -> ActiveMessageC;    // Let Node read link-layer addrs
+
     components new SimpleSendC(AM_PACK);
     Node.Sender -> SimpleSendC;
 
     components CommandHandlerC;
     Node.CommandHandler -> CommandHandlerC;
+
+    // Periodic timer for neighbor discovery
+    components new TimerMilliC() as NDTimerC;
+    Node.periodicTimer -> NDTimerC;
 }

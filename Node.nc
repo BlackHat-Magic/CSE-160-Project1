@@ -22,6 +22,12 @@ module Node{
    uses interface SimpleSend as Sender;
 
    uses interface CommandHandler;
+
+   // new interfaces
+   uses interface AMPacket;
+   uses interface Timer<TMilli> as periodicTimer;
+
+   // uint16_t nextseq = 1;
 }
 
 implementation{
@@ -32,6 +38,8 @@ implementation{
 
    event void Boot.booted(){
       call AMControl.start();
+
+      call periodicTimer.startPeriodic(10000, + (TOS_NODE_ID * 137) % 2000);
 
       dbg(GENERAL_CHANNEL, "Booted\n");
    }

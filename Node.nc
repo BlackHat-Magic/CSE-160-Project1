@@ -32,6 +32,7 @@ module Node{
 
 implementation{
    pack sendPackage;
+   uint16_t nextSeq = 1;
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -51,6 +52,24 @@ implementation{
          //Retry until successful
          call AMControl.start();
       }
+   }
+
+   event void periodicTimer.fired () {
+      pack p;
+      p.src = TOS_NODE_ID;
+      p.dest = AM_BROADCAST_ADDR;
+      p.seq = nextSeq++;
+      p.TTL = 1;
+      p.protocol = PROTOCOL_PING;
+      memset (p.payload, 0, PACKET_MAX_PAYLOAD_SIZE);
+
+      dbg(
+         NEIGHBOR_CHANNEL,
+         "ND: node %u sending probe seq=%u\n",
+         TOS_NODE_ID,
+         p.seq
+      )
+      call Sender.send(p, AM_BROADCAST_ADDR);
    }
 
    event void AMControl.stopDone(error_t err){}

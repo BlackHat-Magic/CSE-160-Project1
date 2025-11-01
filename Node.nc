@@ -12,7 +12,7 @@
 #include "includes/CommandMsg.h"
 #include "includes/sendInfo.h"
 #include "includes/channels.h"
-// #include "dataStructures/interfaces/Hashmap.nc"
+// #include "dataStructures/interfaces/Hashmap.nc" // you said this was optional
 
 module Node{
    uses interface Boot;
@@ -78,12 +78,16 @@ implementation{
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
       uint16_t src, seq, last;
+      pack* p;
+      pack forward_packet;
+      error_t e;
 
       dbg(GENERAL_CHANNEL, "Packet Received\n");
       if (len != sizeof (pack)) {
          dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);
          return msg;
       };
+      p = (pack*) payload;
       
       src = p->src;
       seq = p->seq;
@@ -102,13 +106,39 @@ implementation{
          dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (was %u)\n", src, seq, last);
       }
 
+      // is for me? 🥺👉👈
+      if (dest == TOS_NODE_ID) {
+         dbg(
+            FLOODING_CHANNEL, "DEL to %u from %u seq=%u proto=%u, payload=%s\n",
+            TOS_NODE_ID, src, seq, p->protocol, p->payload
+         );
+         return msg;
+      }
+
+      if (ttl <= 0) {
+         dbg(FLOODING_CHANNEL, "TTL expired drop src=%u seq=%u\n", src, seq);
+         return msg;
+      }
+
+      forward_packet = *p;
+      forward_packet.TTL = ttl - 1;
+      dbg(
+         FLOODING_CHANNEL, "FWD src=%u, dst=%u, seq=%u, ttl=%u\n",
+         src, dest, seq, forward_packet.ttl
+      );
+      e = call Sender.send(forward_packet, AM_BROADCAST_ADDR);
+      if (e != SUCCESS) {
+         dbg(GENERAL_CHANNEL, "Sender.send returned %d\n", e);
+      }
+
       return msg;
    }
 
 
    event void CommandHandler.ping(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, 0, 0, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, PROTOCOL_PING, nextSeq++, MAX_TTL, payload, PACKET_MAX_PAYLOAD_SIZE);
+      call Sender.send(sendPackage, AM_BROADCAST_ADDR);
       call Sender.send(sendPackage, destination);
    }
 

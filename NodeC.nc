@@ -38,6 +38,6 @@ implementation {
     Node.periodicTimer -> NDTimerC;
 
     //  Key: Src    Value: Last Seq
-    components new HashMapC(uint16_t, 256) as SeqMapC;
+    components new HashmapC(uint16_t, 256) as SeqMapC;
     Node.SeqMap -> SeqMapC;
 }

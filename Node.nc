@@ -6,13 +6,15 @@
  * @date   2013/09/03
  *
  */
+#include <string.h>
+#include <AM.h>
 #include <Timer.h>
 #include "includes/command.h"
 #include "includes/packet.h"
 #include "includes/CommandMsg.h"
 #include "includes/sendInfo.h"
 #include "includes/channels.h"
-// #include "dataStructures/interfaces/Hashmap.nc" // you said this was optional
+// #include "dataStructures/interfaces/Hashmap.nc"
 
 module Node{
    uses interface Boot;
@@ -42,7 +44,7 @@ implementation{
    event void Boot.booted(){
       call AMControl.start();
 
-      call periodicTimer.startPeriodic(10000, + (TOS_NODE_ID * 137) % 2000);
+      call periodicTimer.startPeriodic(10000 + (TOS_NODE_ID * 137) % 2000);
 
       dbg(GENERAL_CHANNEL, "Booted\n");
    }
@@ -70,14 +72,14 @@ implementation{
          "ND: node %u sending probe seq=%u\n",
          TOS_NODE_ID,
          p.seq
-      )
+      );
       call Sender.send(p, AM_BROADCAST_ADDR);
    }
 
    event void AMControl.stopDone(error_t err){}
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
-      uint16_t src, seq, last;
+      uint16_t src, seq, last, dest, ttl;
       pack* p;
       pack forward_packet;
       error_t e;
@@ -91,19 +93,21 @@ implementation{
       
       src = p->src;
       seq = p->seq;
+      dest = p->dest;
+      ttl = p->TTL;
 
       if (!call SeqMap.contains(src)) {
          call SeqMap.insert(src, seq);
          dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (not seen before)\n", src, seq);
-         return msg;
-      }
-
-      last = call SeqMap.get(src);
-      if (seq <= last) {
-         dbg(FLOODING_CHANNEL, "DUP from %u seq=%u (last %u); drop\n", src, seq, last)
       } else {
-         call SeqMap.insert(src, seq);
-         dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (was %u)\n", src, seq, last);
+         last = call SeqMap.get(src);
+         if (seq <= last) {
+            dbg(FLOODING_CHANNEL, "DUP from %u seq=%u (last %u); drop\n", src, seq, last);
+            return msg;
+         } else {
+            call SeqMap.insert(src, seq);
+            dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (was %u)\n", src, seq, last);
+         }
       }
 
       // is for me? 🥺👉👈
@@ -115,7 +119,7 @@ implementation{
          return msg;
       }
 
-      if (ttl <= 0) {
+      if (ttl <= 1) {
          dbg(FLOODING_CHANNEL, "TTL expired drop src=%u seq=%u\n", src, seq);
          return msg;
       }
@@ -124,7 +128,7 @@ implementation{
       forward_packet.TTL = ttl - 1;
       dbg(
          FLOODING_CHANNEL, "FWD src=%u, dst=%u, seq=%u, ttl=%u\n",
-         src, dest, seq, forward_packet.ttl
+         src, dest, seq, forward_packet.TTL
       );
       e = call Sender.send(forward_packet, AM_BROADCAST_ADDR);
       if (e != SUCCESS) {
@@ -137,9 +141,8 @@ implementation{
 
    event void CommandHandler.ping(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, PROTOCOL_PING, nextSeq++, MAX_TTL, payload, PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PING, nextSeq++, payload, PACKET_MAX_PAYLOAD_SIZE);
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
-      call Sender.send(sendPackage, destination);
    }
 
    event void CommandHandler.printNeighbors(){}

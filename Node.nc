@@ -52,7 +52,6 @@ implementation{
    uint16_t lsNbr[MAX_NODES + 1][MAX_DEGREE];
    uint8_t  lsCost[MAX_NODES + 1][MAX_DEGREE];
    uint16_t routeNext[MAX_NODES + 1];
-   uint16_t routeCost[MAX_NODES + 1];
 
    bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
       uint8_t i, j;
@@ -115,7 +114,7 @@ implementation{
    void sendLSA() {
       pack p;
       uint8_t i, count = 0, maxEntries = (PACKET_MAX_PAYLOAD_SIZE - 3) / 3;
-      uint8_t *pl = p.payload;
+      nx_uint8_t *pl = p.payload;
 
       p.src = TOS_NODE_ID;
       p.dest = AM_BROADCAST_ADDR;
@@ -154,7 +153,7 @@ implementation{
       call Sender.send(p, AM_BROADCAST_ADDR);
    }
 
-   void applyLSA(uint16_t origin, uint8_t *pl, uint8_t len)
+   void applyLSA(uint16_t origin, nx_uint8_t *pl, uint8_t len)
    {
       uint16_t seq = ((uint16_t)pl[0] << 8) | pl[1];
       uint8_t  cnt = pl[2];
@@ -213,20 +212,6 @@ implementation{
          neighbors[idx].misses = 0; // reset miss counter on any reply
       }
    }
-
-   enum { MAX_NODES = 32, MAX_DEGREE = 8, INF_COST = 0x3fff };
-
-   uint16_t lsaMySeq = 1;                  // my LSA seq
-   uint16_t lsaLastSeq[MAX_NODES + 1];     // last LSA seq seen per origin
-
-   // LSDB: for each node u, its advertised neighbor list
-   uint8_t  lsCount[MAX_NODES + 1];
-   uint16_t lsNbr[MAX_NODES + 1][MAX_DEGREE];
-   uint8_t  lsCost[MAX_NODES + 1][MAX_DEGREE];
-
-   // Routing table: next hop and path cost from me to each dest
-   uint16_t routeNext[MAX_NODES + 1];
-   uint16_t routeCost[MAX_NODES + 1];
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);

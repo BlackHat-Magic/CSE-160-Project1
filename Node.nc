@@ -96,6 +96,34 @@ implementation{
       dest = p->dest;
       ttl = p->TTL;
 
+      if (p->protocol == PROTOCOL_PING && dest == AM_BROADCAST_ADDR) {
+         if (src != TOS_NODE_ID) {
+            pack reply;
+
+            dbg(NEIGHBOR_CHANNEL, "ND: node %u received ND probe from %u seq=%u - replying\n", TOS_NODE_ID, src, seq);
+
+            reply.src = TOS_NODE_ID;
+            reply.dest = src;
+            reply.seq = nextSeq++;
+            reply.TTL = MAX_TTL;
+            reply.protocol = PROTOCOL_PINGREPLY;
+            memcpy(reply.payload, p->payload, PACKET_MAX_PAYLOAD_SIZE);
+            ((char*)reply.payload)[PACKET_MAX_PAYLOAD_SIZE - 1] = '\0';
+
+            if (!call SeqMap.insert(reply.src, reply.seq)) {
+               call SeqMap.insert(reply.src, reply.seq);
+            } else {
+               call SeqMap.insert(reply.src, reply.seq);
+            }
+
+            e = call Sender.send(reply, AM_BROADCAST_ADDR);
+            if (e != SUCCESS) {
+               dbg(GENERAL_CHANNEL, "Sender.send (ND reply) returned %d\n", e);
+            }
+         }
+         return msg;
+      }
+
       if (!call SeqMap.contains(src)) {
          call SeqMap.insert(src, seq);
          dbg(FLOODING_CHANNEL, "NEW from %u seq=%u (not seen before)\n", src, seq);

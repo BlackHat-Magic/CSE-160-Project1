@@ -110,11 +110,7 @@ implementation{
             memcpy(reply.payload, p->payload, PACKET_MAX_PAYLOAD_SIZE);
             ((char*)reply.payload)[PACKET_MAX_PAYLOAD_SIZE - 1] = '\0';
 
-            if (!call SeqMap.insert(reply.src, reply.seq)) {
-               call SeqMap.insert(reply.src, reply.seq);
-            } else {
-               call SeqMap.insert(reply.src, reply.seq);
-            }
+            call SeqMap.insert(reply.src, reply.seq);
 
             e = call Sender.send(reply, AM_BROADCAST_ADDR);
             if (e != SUCCESS) {

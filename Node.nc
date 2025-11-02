@@ -45,6 +45,15 @@ implementation{
    } neighbor_entry_t;
    neighbor_entry_t neighbors[MAX_NEIGHBORS];
 
+   enum { MAX_NODES = 32, MAX_DEGREE = 8, INF_COST = 0x3fff };
+   uint16_t lsaMySeq = 1;                  // my LSA seq
+   uint16_t lsaLastSeq[MAX_NODES + 1];     // last LSA seq seen per origin
+   uint8_t  lsCount[MAX_NODES + 1];
+   uint16_t lsNbr[MAX_NODES + 1][MAX_DEGREE];
+   uint8_t  lsCost[MAX_NODES + 1][MAX_DEGREE];
+   uint16_t routeNext[MAX_NODES + 1];
+   uint16_t routeCost[MAX_NODES + 1];
+
    bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
       uint8_t i, j;
       // find v in u’s list
@@ -143,6 +152,33 @@ implementation{
 
       dbg(ROUTING_CHANNEL, "LSA: send seq=%u entries=%u\n", lsaMySeq - 1, count);
       call Sender.send(p, AM_BROADCAST_ADDR);
+   }
+
+   void applyLSA(uint16_t origin, uint8_t *pl, uint8_t len)
+   {
+      uint16_t seq = ((uint16_t)pl[0] << 8) | pl[1];
+      uint8_t  cnt = pl[2];
+      uint8_t  i, maxCnt = (PACKET_MAX_PAYLOAD_SIZE - 3) / 3;
+      if (cnt > maxCnt) cnt = maxCnt;
+
+      if (seq <= lsaLastSeq[origin]) {
+         dbg(ROUTING_CHANNEL, "LSA: old from %u (got %u <= have %u)\n",
+             origin, seq, lsaLastSeq[origin]);
+         return;
+      }
+      lsaLastSeq[origin] = seq;
+
+      lsCount[origin] = 0;
+      for (i = 0; i < cnt && i < MAX_DEGREE; i++) {
+         uint16_t nb = ((uint16_t)pl[3 + 3*i] << 8) | pl[3 + 3*i + 1];
+         uint8_t  c  = pl[3 + 3*i + 2];
+         lsNbr[origin][i]  = nb;
+         lsCost[origin][i] = c;
+      }
+      lsCount[origin] = (cnt > MAX_DEGREE) ? MAX_DEGREE : cnt;
+
+      dbg(ROUTING_CHANNEL, "LSA: rx from %u seq=%u entries=%u\n", origin, seq, lsCount[origin]);
+      recomputeRoutes();
    }
 
    // Neighbor helpers
@@ -262,6 +298,18 @@ implementation{
       dest = p->dest;
       ttl = p->TTL;
 
+      if (p->protocol == PROTOCOL_LINKSTATE) {
+         // Use your duplicate filter; if this is the first time, SeqMap will be updated below.
+         // Parse/apply LSA
+         applyLSA(src, p->payload, PACKET_MAX_PAYLOAD_SIZE);
+         if (ttl > 1) {
+            pack fwd = *p; fwd.TTL = ttl - 1;
+            dbg(FLOODING_CHANNEL, "LSA FWD from %u ttl=%u\n", src, fwd.TTL);
+            call Sender.send(fwd, AM_BROADCAST_ADDR);
+         }
+         return msg;
+      }
+
       if (p->protocol == PROTOCOL_PING && dest == AM_BROADCAST_ADDR) {
          if (src != TOS_NODE_ID) {
             pack reply;
@@ -307,7 +355,7 @@ implementation{
          if (p->protocol == PROTOCOL_PING){
             pack reply2;
             dbg(FLOODING_CHANNEL, "PING to me (%u) from %u seq=%u payload=%s\n", TOS_NODE_ID, src, seq, p->payload);
-            // Send a ping reply back to the origin
+            // Send a ping reply back to the origin (prefer unicast via routing)
             reply2.src = TOS_NODE_ID;
             reply2.dest = src;
             reply2.seq = nextSeq++;
@@ -315,7 +363,14 @@ implementation{
             reply2.protocol = PROTOCOL_PINGREPLY;
             memcpy(reply2.payload, p->payload, PACKET_MAX_PAYLOAD_SIZE);
             ((char*)reply2.payload)[PACKET_MAX_PAYLOAD_SIZE - 1] = '\0';
-            e = call Sender.send(reply2, AM_BROADCAST_ADDR);
+            if (src <= MAX_NODES && routeNext[src] != 0 && routeCost[src] < INF_COST) {
+               uint16_t nh2 = routeNext[src];
+               dbg(ROUTING_CHANNEL, "ROUTE REPLY to %u via %u\n", src, nh2);
+               e = call Sender.send(reply2, nh2);
+            } else {
+               // fall back to flood if no route yet
+               e = call Sender.send(reply2, AM_BROADCAST_ADDR);
+            }
             if (e != SUCCESS) {
                dbg(GENERAL_CHANNEL, "Sender.send (PING reply) returned %d\n", e);
             }
@@ -366,7 +421,15 @@ implementation{
    event void CommandHandler.ping(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
       makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PING, nextSeq++, payload, PACKET_MAX_PAYLOAD_SIZE);
-      call Sender.send(sendPackage, AM_BROADCAST_ADDR);
+      // Prefer routed unicast if we have a route; otherwise flood to bootstrap
+      if (destination <= MAX_NODES && routeNext[destination] != 0 && routeCost[destination] < INF_COST) {
+         uint16_t nh = routeNext[destination];
+         dbg(ROUTING_CHANNEL, "ROUTE ORIG dst=%u via=%u\n", destination, nh);
+         call Sender.send(sendPackage, nh);
+      } else {
+         dbg(FLOODING_CHANNEL, "ORIG flood dst=%u (no route yet)\n", destination);
+         call Sender.send(sendPackage, AM_BROADCAST_ADDR);
+      }
    }
 
    event void CommandHandler.printNeighbors(){

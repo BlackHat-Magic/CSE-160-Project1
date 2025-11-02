@@ -34,6 +34,106 @@ module Node{
    uses interface Hashmap<uint16_t> as SeqMap;
 }
 
+bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
+   uint8_t i, j;
+   // find v in u’s list
+   for (i = 0; i < lsCount[u]; i++) {
+      if (lsNbr[u][i] == v) {
+         // find u in v’s list (symmetric requirement)
+         for (j = 0; j < lsCount[v]; j++) {
+            if (lsNbr[v][j] == u) {
+               if (costOut) *costOut = lsCost[u][i]; // choose u’s advertised cost
+               return TRUE;
+            }
+         }
+      }
+   }
+   return FALSE;
+}
+
+void recomputeRoutes() {
+   uint16_t my = TOS_NODE_ID;
+   uint16_t dist[MAX_NODES + 1];
+   uint16_t firstHop[MAX_NODES + 1];
+   bool     vis[MAX_NODES + 1];
+   uint16_t i, u, v, best, bestd;
+   uint8_t  c;
+
+   for (i = 0; i <= MAX_NODES; i++) {
+      dist[i] = INF_COST; firstHop[i] = 0; vis[i] = FALSE;
+   }
+   dist[my] = 0; firstHop[my] = my;
+
+  // Simple O(N^2 + E) Dijkstra using LSDB neighbors
+   for (;;) {
+      best = 0; bestd = INF_COST;
+      for (i = 1; i <= MAX_NODES; i++) {
+         if (!vis[i] && dist[i] < bestd) { bestd = dist[i]; best = i; }
+      }
+      if (best == 0 || bestd == INF_COST) break;
+      u = best; vis[u] = TRUE;
+
+      // relax neighbors of u
+      for (i = 0; i < lsCount[u]; i++) {
+         v = lsNbr[u][i];
+         if (!hasEdge(u, v, &c)) continue; // only symmetric links
+         if (dist[u] + c < dist[v]) {
+         dist[v] = dist[u] + c;
+         firstHop[v] = (u == my) ? v : firstHop[u];
+         }
+      }
+   }
+
+   for (i = 1; i <= MAX_NODES; i++) {
+      routeNext[i] = firstHop[i];
+      routeCost[i] = dist[i];
+   }
+
+   dbg(ROUTING_CHANNEL, "RT: recomputed (me=%u)\n", my);
+}
+
+void sendLSA() {
+   pack p;
+   uint8_t i, count = 0, maxEntries = (PACKET_MAX_PAYLOAD_SIZE - 3) / 3;
+   uint8_t *pl = p.payload;
+
+   p.src = TOS_NODE_ID;
+   p.dest = AM_BROADCAST_ADDR;
+   p.seq = nextSeq++;              // keep global monotonic seq
+   p.TTL = MAX_TTL;
+   p.protocol = PROTOCOL_LINKSTATE;
+
+   // header: seq (2 bytes), count (1 byte)
+   pl[0] = (lsaMySeq >> 8) & 0xff;
+   pl[1] = (lsaMySeq     ) & 0xff;
+   pl[2] = 0; // fill later
+   for (i = 0; i < MAX_NEIGHBORS && count < maxEntries; i++) {
+      if (neighbors[i].addr == 0) continue;
+      pl[3 + 3*count + 0] = (neighbors[i].addr >> 8) & 0xff;
+      pl[3 + 3*count + 1] = (neighbors[i].addr     ) & 0xff;
+      pl[3 + 3*count + 2] = 1;  // cost=1 (or derive from your ND stats)
+      count++;
+   }
+   pl[2] = count;
+   lsaMySeq++;
+
+   // Also update our own LSDB entry locally
+   {
+      uint8_t k = 0; uint16_t j;
+      lsCount[TOS_NODE_ID] = 0;
+      for (j = 0; j < MAX_NEIGHBORS && k < MAX_DEGREE; j++) {
+         if (neighbors[j].addr == 0) continue;
+         lsNbr[TOS_NODE_ID][k]  = neighbors[j].addr;
+         lsCost[TOS_NODE_ID][k] = 1;
+         k++;
+      }
+      lsCount[TOS_NODE_ID] = k;
+   }
+
+   dbg(ROUTING_CHANNEL, "LSA: send seq=%u entries=%u\n", lsaMySeq - 1, count);
+   call Sender.send(p, AM_BROADCAST_ADDR);
+}
+
 implementation{
    pack sendPackage;
    uint16_t nextSeq = 1;
@@ -68,6 +168,8 @@ implementation{
             neighbors[idx].addr = a;
             neighbors[idx].misses = 0;
             dbg(NEIGHBOR_CHANNEL, "ND: add neighbor %u\n", a);
+            sendLSA ();
+            recomputeRoutes ();
          }else{
             dbg(NEIGHBOR_CHANNEL, "ND: neighbor table full, cannot add %u\n", a);
          }
@@ -75,6 +177,20 @@ implementation{
          neighbors[idx].misses = 0; // reset miss counter on any reply
       }
    }
+
+   enum { MAX_NODES = 32, MAX_DEGREE = 8, INF_COST = 0x3fff };
+
+   uint16_t lsaMySeq = 1;                  // my LSA seq
+   uint16_t lsaLastSeq[MAX_NODES + 1];     // last LSA seq seen per origin
+
+   // LSDB: for each node u, its advertised neighbor list
+   uint8_t  lsCount[MAX_NODES + 1];
+   uint16_t lsNbr[MAX_NODES + 1][MAX_DEGREE];
+   uint8_t  lsCost[MAX_NODES + 1][MAX_DEGREE];
+
+   // Routing table: next hop and path cost from me to each dest
+   uint16_t routeNext[MAX_NODES + 1];
+   uint16_t routeCost[MAX_NODES + 1];
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -214,8 +330,21 @@ implementation{
          return msg;
       }
 
-      if (ttl <= 1) {
-         dbg(FLOODING_CHANNEL, "TTL expired drop src=%u seq=%u\n", src, seq);
+      if (dest != AM_BROADCAST_ADDR) {
+         if (ttl <= 1) {
+            dbg(ROUTING_CHANNEL, "DROP TTL0 src=%u dst=%u seq=%u\n", src, dest, seq);
+            return msg;
+         }
+         // route lookup
+         if (dest <= MAX_NODES && routeNext[dest] != 0 && routeCost[dest] < INF_COST) {
+            uint16_t nh = routeNext[dest];
+            pack fwd = *p; fwd.TTL = ttl - 1;
+            dbg(ROUTING_CHANNEL, "ROUTE FWD src=%u dst=%u via=%u seq=%u ttl=%u\n",
+               src, dest, nh, seq, fwd.TTL);
+            call Sender.send(fwd, nh);   // unicast to next-hop
+         } else {
+            dbg(ROUTING_CHANNEL, "NO ROUTE src=%u dst=%u seq=%u — drop\n", src, dest, seq);
+         }
          return msg;
       }
 
@@ -251,7 +380,25 @@ implementation{
       }
    }
 
-   event void CommandHandler.printRouteTable(){}
+   event void CommandHandler.printRouteTable(){
+      uint16_t d;
+      dbg(ROUTING_CHANNEL, "Route table (me=%u):\n", TOS_NODE_ID);
+      for (d = 1; d <= MAX_NODES; d++){
+         if (routeNext[d] != 0 && routeCost[d] < INF_COST) {
+            dbg(ROUTING_CHANNEL, "  dest=%u next=%u cost=%u\n", d, routeNext[d], routeCost[d]);
+         }
+      }
+      // Optional: dump LSDB
+      for (d = 1; d <= MAX_NODES; d++){
+         uint8_t i;
+         if (lsCount[d] == 0) continue;
+         dbg(ROUTING_CHANNEL, "  LSA[%u] seq=%u:", d, lsaLastSeq[d]);
+         for (i = 0; i < lsCount[d]; i++){
+            dbg(ROUTING_CHANNEL, " (%u,c%u)", lsNbr[d][i], lsCost[d][i]);
+         }
+         dbg(ROUTING_CHANNEL, "\n");
+      }
+   }
 
    event void CommandHandler.printLinkState(){}
 

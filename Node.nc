@@ -38,6 +38,44 @@ implementation{
    pack sendPackage;
    uint16_t nextSeq = 1;
 
+   enum { MAX_NEIGHBORS = 32, ND_MISS_THRESHOLD = 5 };
+   typedef struct neighbor_entry {
+      uint16_t addr;   // neighbor node id
+      uint8_t  misses; // consecutive ND periods with no reply
+   } neighbor_entry_t;
+   neighbor_entry_t neighbors[MAX_NEIGHBORS];
+
+   // Neighbor helpers
+   int16_t findNeighbor(uint16_t a){
+      int16_t i;
+      for (i = 0; i < MAX_NEIGHBORS; i++){
+         if (neighbors[i].addr == a) return i;
+      }
+      return -1;
+   }
+   int16_t allocNeighborSlot(){
+      int16_t i;
+      for (i = 0; i < MAX_NEIGHBORS; i++){
+         if (neighbors[i].addr == 0) return i;
+      }
+      return -1;
+   }
+   void noteNeighborHeard(uint16_t a){
+      int16_t idx = findNeighbor(a);
+      if (idx < 0){
+         idx = allocNeighborSlot();
+         if (idx >= 0){
+            neighbors[idx].addr = a;
+            neighbors[idx].misses = 0;
+            dbg(NEIGHBOR_CHANNEL, "ND: add neighbor %u\n", a);
+         }else{
+            dbg(NEIGHBOR_CHANNEL, "ND: neighbor table full, cannot add %u\n", a);
+         }
+      }else{
+         neighbors[idx].misses = 0; // reset miss counter on any reply
+      }
+   }
+
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
 
@@ -60,6 +98,18 @@ implementation{
 
    event void periodicTimer.fired () {
       pack p;
+      int16_t;
+
+      for (i = 0; i < MAX_NEIGHBORS; i++) {
+         if (neighbors[i].addr == 0) continue;
+         if (neighbors[i].misses < 255) neighbors[i].misses++;
+         if (neighbors[i].misses >= ND_MISS_THRESHOLD) {
+            dbg(NEIGHBOR_CHANNEL, "ND: drop neighbor %u (misses=%u)\n", neighbors[i].addr, neighbors[i].misses);
+            neighbors[i].addr = 0;
+            neighbors[i].misses = 0;
+         }
+      }
+
       p.src = TOS_NODE_ID;
       p.dest = AM_BROADCAST_ADDR;
       p.seq = nextSeq++;
@@ -136,10 +186,31 @@ implementation{
 
       // is for me? 🥺👉👈
       if (dest == TOS_NODE_ID) {
-         dbg(
-            FLOODING_CHANNEL, "DEL to %u from %u seq=%u proto=%u, payload=%s\n",
-            TOS_NODE_ID, src, seq, p->protocol, p->payload
-         );
+         // Safe %s printing
+         ((char*)p->payload)[PACKET_MAX_PAYLOAD_SIZE - 1] = '\0';
+         if (p->protocol == PROTOCOL_PING){
+            pack reply2;
+            dbg(FLOODING_CHANNEL, "PING to me (%u) from %u seq=%u payload=%s\n", TOS_NODE_ID, src, seq, p->payload);
+            // Send a ping reply back to the origin
+            reply2.src = TOS_NODE_ID;
+            reply2.dest = src;
+            reply2.seq = nextSeq++;
+            reply2.TTL = MAX_TTL;
+            reply2.protocol = PROTOCOL_PINGREPLY;
+            memcpy(reply2.payload, p->payload, PACKET_MAX_PAYLOAD_SIZE);
+            ((char*)reply2.payload)[PACKET_MAX_PAYLOAD_SIZE - 1] = '\0';
+            e = call Sender.send(reply2, AM_BROADCAST_ADDR);
+            if (e != SUCCESS) {
+               dbg(GENERAL_CHANNEL, "Sender.send (PING reply) returned %d\n", e);
+            }
+         } else if (p->protocol == PROTOCOL_PINGREPLY){
+            dbg(FLOODING_CHANNEL, "PINGREPLY to me (%u) from %u seq=%u payload=%s\n", TOS_NODE_ID, src, seq, p->payload);
+            // Treat any ping-reply addressed to me as ND evidence
+            noteNeighborHeard(src);
+            dbg(NEIGHBOR_CHANNEL, "ND: reply heard from %u\n", src);
+         } else {
+            dbg(FLOODING_CHANNEL, "DEL to %u from %u seq=%u proto=%u payload=%s\n", TOS_NODE_ID, src, seq, p->protocol, p->payload);
+         }
          return msg;
       }
 
@@ -169,7 +240,14 @@ implementation{
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
    }
 
-   event void CommandHandler.printNeighbors(){}
+   event void CommandHandler.printNeighbors(){
+      int16_t i;
+      dbg(NEIGHBOR_CHANNEL, "Neighbor dump for node %u:\n", TOS_NODE_ID);
+      for (i = 0; i < MAX_NEIGHBORS; i++){
+         if (neighbors[i].addr != 0){
+            dbg(NEIGHBOR_CHANNEL, "  neighbor=%u misses=%u\n", neighbors[i].addr, neighbors[i].misses);
+         }
+      }
 
    event void CommandHandler.printRouteTable(){}
 

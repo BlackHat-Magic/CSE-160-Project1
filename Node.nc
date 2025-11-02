@@ -244,10 +244,10 @@ implementation{
       int16_t i;
       dbg(NEIGHBOR_CHANNEL, "Neighbor dump for node %u:\n", TOS_NODE_ID);
       for (i = 0; i < MAX_NEIGHBORS; i++){
-         // if (neighbors[i].addr != 0){
-         //    dbg(NEIGHBOR_CHANNEL, "  neighbor=%u misses=%u\n", neighbors[i].addr, neighbors[i].misses);
-         // }
-         continue;
+         if (neighbors[i].addr != 0){
+            dbg(NEIGHBOR_CHANNEL, "  neighbor=%u misses=%u\n", neighbors[i].addr, neighbors[i].misses);
+         }
+         // continue;
       }
    }
 

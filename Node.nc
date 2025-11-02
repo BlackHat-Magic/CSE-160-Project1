@@ -45,39 +45,6 @@ implementation{
    } neighbor_entry_t;
    neighbor_entry_t neighbors[MAX_NEIGHBORS];
 
-   // Neighbor helpers
-   int16_t findNeighbor(uint16_t a){
-      int16_t i;
-      for (i = 0; i < MAX_NEIGHBORS; i++){
-         if (neighbors[i].addr == a) return i;
-      }
-      return -1;
-   }
-   int16_t allocNeighborSlot(){
-      int16_t i;
-      for (i = 0; i < MAX_NEIGHBORS; i++){
-         if (neighbors[i].addr == 0) return i;
-      }
-      return -1;
-   }
-   void noteNeighborHeard(uint16_t a){
-      int16_t idx = findNeighbor(a);
-      if (idx < 0){
-         idx = allocNeighborSlot();
-         if (idx >= 0){
-            neighbors[idx].addr = a;
-            neighbors[idx].misses = 0;
-            dbg(NEIGHBOR_CHANNEL, "ND: add neighbor %u\n", a);
-            sendLSA ();
-            recomputeRoutes ();
-         }else{
-            dbg(NEIGHBOR_CHANNEL, "ND: neighbor table full, cannot add %u\n", a);
-         }
-      }else{
-         neighbors[idx].misses = 0; // reset miss counter on any reply
-      }
-   }
-
    bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
       uint8_t i, j;
       // find v in u’s list
@@ -176,6 +143,39 @@ implementation{
 
       dbg(ROUTING_CHANNEL, "LSA: send seq=%u entries=%u\n", lsaMySeq - 1, count);
       call Sender.send(p, AM_BROADCAST_ADDR);
+   }
+
+   // Neighbor helpers
+   int16_t findNeighbor(uint16_t a){
+      int16_t i;
+      for (i = 0; i < MAX_NEIGHBORS; i++){
+         if (neighbors[i].addr == a) return i;
+      }
+      return -1;
+   }
+   int16_t allocNeighborSlot(){
+      int16_t i;
+      for (i = 0; i < MAX_NEIGHBORS; i++){
+         if (neighbors[i].addr == 0) return i;
+      }
+      return -1;
+   }
+   void noteNeighborHeard(uint16_t a){
+      int16_t idx = findNeighbor(a);
+      if (idx < 0){
+         idx = allocNeighborSlot();
+         if (idx >= 0){
+            neighbors[idx].addr = a;
+            neighbors[idx].misses = 0;
+            dbg(NEIGHBOR_CHANNEL, "ND: add neighbor %u\n", a);
+            sendLSA ();
+            recomputeRoutes ();
+         }else{
+            dbg(NEIGHBOR_CHANNEL, "ND: neighbor table full, cannot add %u\n", a);
+         }
+      }else{
+         neighbors[idx].misses = 0; // reset miss counter on any reply
+      }
    }
 
    enum { MAX_NODES = 32, MAX_DEGREE = 8, INF_COST = 0x3fff };

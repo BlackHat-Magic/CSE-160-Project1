@@ -34,106 +34,6 @@ module Node{
    uses interface Hashmap<uint16_t> as SeqMap;
 }
 
-bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
-   uint8_t i, j;
-   // find v in u’s list
-   for (i = 0; i < lsCount[u]; i++) {
-      if (lsNbr[u][i] == v) {
-         // find u in v’s list (symmetric requirement)
-         for (j = 0; j < lsCount[v]; j++) {
-            if (lsNbr[v][j] == u) {
-               if (costOut) *costOut = lsCost[u][i]; // choose u’s advertised cost
-               return TRUE;
-            }
-         }
-      }
-   }
-   return FALSE;
-}
-
-void recomputeRoutes() {
-   uint16_t my = TOS_NODE_ID;
-   uint16_t dist[MAX_NODES + 1];
-   uint16_t firstHop[MAX_NODES + 1];
-   bool     vis[MAX_NODES + 1];
-   uint16_t i, u, v, best, bestd;
-   uint8_t  c;
-
-   for (i = 0; i <= MAX_NODES; i++) {
-      dist[i] = INF_COST; firstHop[i] = 0; vis[i] = FALSE;
-   }
-   dist[my] = 0; firstHop[my] = my;
-
-  // Simple O(N^2 + E) Dijkstra using LSDB neighbors
-   for (;;) {
-      best = 0; bestd = INF_COST;
-      for (i = 1; i <= MAX_NODES; i++) {
-         if (!vis[i] && dist[i] < bestd) { bestd = dist[i]; best = i; }
-      }
-      if (best == 0 || bestd == INF_COST) break;
-      u = best; vis[u] = TRUE;
-
-      // relax neighbors of u
-      for (i = 0; i < lsCount[u]; i++) {
-         v = lsNbr[u][i];
-         if (!hasEdge(u, v, &c)) continue; // only symmetric links
-         if (dist[u] + c < dist[v]) {
-         dist[v] = dist[u] + c;
-         firstHop[v] = (u == my) ? v : firstHop[u];
-         }
-      }
-   }
-
-   for (i = 1; i <= MAX_NODES; i++) {
-      routeNext[i] = firstHop[i];
-      routeCost[i] = dist[i];
-   }
-
-   dbg(ROUTING_CHANNEL, "RT: recomputed (me=%u)\n", my);
-}
-
-void sendLSA() {
-   pack p;
-   uint8_t i, count = 0, maxEntries = (PACKET_MAX_PAYLOAD_SIZE - 3) / 3;
-   uint8_t *pl = p.payload;
-
-   p.src = TOS_NODE_ID;
-   p.dest = AM_BROADCAST_ADDR;
-   p.seq = nextSeq++;              // keep global monotonic seq
-   p.TTL = MAX_TTL;
-   p.protocol = PROTOCOL_LINKSTATE;
-
-   // header: seq (2 bytes), count (1 byte)
-   pl[0] = (lsaMySeq >> 8) & 0xff;
-   pl[1] = (lsaMySeq     ) & 0xff;
-   pl[2] = 0; // fill later
-   for (i = 0; i < MAX_NEIGHBORS && count < maxEntries; i++) {
-      if (neighbors[i].addr == 0) continue;
-      pl[3 + 3*count + 0] = (neighbors[i].addr >> 8) & 0xff;
-      pl[3 + 3*count + 1] = (neighbors[i].addr     ) & 0xff;
-      pl[3 + 3*count + 2] = 1;  // cost=1 (or derive from your ND stats)
-      count++;
-   }
-   pl[2] = count;
-   lsaMySeq++;
-
-   // Also update our own LSDB entry locally
-   {
-      uint8_t k = 0; uint16_t j;
-      lsCount[TOS_NODE_ID] = 0;
-      for (j = 0; j < MAX_NEIGHBORS && k < MAX_DEGREE; j++) {
-         if (neighbors[j].addr == 0) continue;
-         lsNbr[TOS_NODE_ID][k]  = neighbors[j].addr;
-         lsCost[TOS_NODE_ID][k] = 1;
-         k++;
-      }
-      lsCount[TOS_NODE_ID] = k;
-   }
-
-   dbg(ROUTING_CHANNEL, "LSA: send seq=%u entries=%u\n", lsaMySeq - 1, count);
-   call Sender.send(p, AM_BROADCAST_ADDR);
-}
-
 implementation{
    pack sendPackage;
    uint16_t nextSeq = 1;
@@ -176,6 +76,106 @@ implementation{
       }else{
          neighbors[idx].misses = 0; // reset miss counter on any reply
       }
+   }
+
+   bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
+      uint8_t i, j;
+      // find v in u’s list
+      for (i = 0; i < lsCount[u]; i++) {
+         if (lsNbr[u][i] == v) {
+            // find u in v’s list (symmetric requirement)
+            for (j = 0; j < lsCount[v]; j++) {
+               if (lsNbr[v][j] == u) {
+                  if (costOut) *costOut = lsCost[u][i]; // choose u’s advertised cost
+                  return TRUE;
+               }
+            }
+         }
+      }
+      return FALSE;
+   }
+
+   void recomputeRoutes() {
+      uint16_t my = TOS_NODE_ID;
+      uint16_t dist[MAX_NODES + 1];
+      uint16_t firstHop[MAX_NODES + 1];
+      bool     vis[MAX_NODES + 1];
+      uint16_t i, u, v, best, bestd;
+      uint8_t  c;
+
+      for (i = 0; i <= MAX_NODES; i++) {
+         dist[i] = INF_COST; firstHop[i] = 0; vis[i] = FALSE;
+      }
+      dist[my] = 0; firstHop[my] = my;
+
+   // Simple O(N^2 + E) Dijkstra using LSDB neighbors
+      for (;;) {
+         best = 0; bestd = INF_COST;
+         for (i = 1; i <= MAX_NODES; i++) {
+            if (!vis[i] && dist[i] < bestd) { bestd = dist[i]; best = i; }
+         }
+         if (best == 0 || bestd == INF_COST) break;
+         u = best; vis[u] = TRUE;
+
+         // relax neighbors of u
+         for (i = 0; i < lsCount[u]; i++) {
+            v = lsNbr[u][i];
+            if (!hasEdge(u, v, &c)) continue; // only symmetric links
+            if (dist[u] + c < dist[v]) {
+            dist[v] = dist[u] + c;
+            firstHop[v] = (u == my) ? v : firstHop[u];
+            }
+         }
+      }
+
+      for (i = 1; i <= MAX_NODES; i++) {
+         routeNext[i] = firstHop[i];
+         routeCost[i] = dist[i];
+      }
+
+      dbg(ROUTING_CHANNEL, "RT: recomputed (me=%u)\n", my);
+   }
+
+   void sendLSA() {
+      pack p;
+      uint8_t i, count = 0, maxEntries = (PACKET_MAX_PAYLOAD_SIZE - 3) / 3;
+      uint8_t *pl = p.payload;
+
+      p.src = TOS_NODE_ID;
+      p.dest = AM_BROADCAST_ADDR;
+      p.seq = nextSeq++;              // keep global monotonic seq
+      p.TTL = MAX_TTL;
+      p.protocol = PROTOCOL_LINKSTATE;
+
+      // header: seq (2 bytes), count (1 byte)
+      pl[0] = (lsaMySeq >> 8) & 0xff;
+      pl[1] = (lsaMySeq     ) & 0xff;
+      pl[2] = 0; // fill later
+      for (i = 0; i < MAX_NEIGHBORS && count < maxEntries; i++) {
+         if (neighbors[i].addr == 0) continue;
+         pl[3 + 3*count + 0] = (neighbors[i].addr >> 8) & 0xff;
+         pl[3 + 3*count + 1] = (neighbors[i].addr     ) & 0xff;
+         pl[3 + 3*count + 2] = 1;  // cost=1 (or derive from your ND stats)
+         count++;
+      }
+      pl[2] = count;
+      lsaMySeq++;
+
+      // Also update our own LSDB entry locally
+      {
+         uint8_t k = 0; uint16_t j;
+         lsCount[TOS_NODE_ID] = 0;
+         for (j = 0; j < MAX_NEIGHBORS && k < MAX_DEGREE; j++) {
+            if (neighbors[j].addr == 0) continue;
+            lsNbr[TOS_NODE_ID][k]  = neighbors[j].addr;
+            lsCost[TOS_NODE_ID][k] = 1;
+            k++;
+         }
+         lsCount[TOS_NODE_ID] = k;
+      }
+
+      dbg(ROUTING_CHANNEL, "LSA: send seq=%u entries=%u\n", lsaMySeq - 1, count);
+      call Sender.send(p, AM_BROADCAST_ADDR);
    }
 
    enum { MAX_NODES = 32, MAX_DEGREE = 8, INF_COST = 0x3fff };

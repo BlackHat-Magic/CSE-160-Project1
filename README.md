@@ -1,6 +1,6 @@
 # CSE 160 Project 1
 
-...
+Public because the provided TinyOS image doesn't play nice with basically anything so this is the easiest way to clone the repo onto it.
 
 ## Objective and Goals
 

@@ -98,7 +98,7 @@ implementation{
 
    event void periodicTimer.fired () {
       pack p;
-      int16_t;
+      int16_t i;
 
       for (i = 0; i < MAX_NEIGHBORS; i++) {
          if (neighbors[i].addr == 0) continue;

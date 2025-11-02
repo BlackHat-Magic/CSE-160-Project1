@@ -248,6 +248,7 @@ implementation{
             dbg(NEIGHBOR_CHANNEL, "  neighbor=%u misses=%u\n", neighbors[i].addr, neighbors[i].misses);
          }
       }
+   }
 
    event void CommandHandler.printRouteTable(){}
 

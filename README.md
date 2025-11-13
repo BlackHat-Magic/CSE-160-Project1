@@ -1,8 +1,8 @@
-# CSE 160 Project 1
+# CSE 160
 
 Public because the provided TinyOS image doesn't play nice with basically anything so this is the easiest way to clone the repo onto it.
 
-## Objective and Goals
+## Project 1: Objective and Goals
 
 ### Flooding
 
@@ -16,6 +16,8 @@ Public because the provided TinyOS image doesn't play nice with basically anythi
 - Each node should be able to discover all of its neighbors.
 - No new packet type than provided.
 - Account for neighbors that drop out of the network.
+
+## Project 2: Link State Routing
 
 ## Starting
 

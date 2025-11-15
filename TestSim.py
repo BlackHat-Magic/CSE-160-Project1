@@ -147,6 +147,7 @@ def main():
     s.ping(1, 3, "Hi!")
     s.runTime(20)
     s.routeDMP(4)
+    s.runTime(20)
 
 if __name__ == '__main__':
     main()

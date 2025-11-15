@@ -52,6 +52,7 @@ implementation{
    uint16_t lsNbr[MAX_NODES + 1][MAX_DEGREE];
    uint8_t  lsCost[MAX_NODES + 1][MAX_DEGREE];
    uint16_t routeNext[MAX_NODES + 1];
+   uint16_t routeCost[MAX_NODES + 1];
 
    bool hasEdge(uint16_t u, uint16_t v, uint8_t *costOut) {
       uint8_t i, j;

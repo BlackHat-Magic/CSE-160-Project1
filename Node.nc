@@ -162,8 +162,6 @@ implementation{
       if (cnt > maxCnt) cnt = maxCnt;
 
       if (seq <= lsaLastSeq[origin]) {
-         dbg(ROUTING_CHANNEL, "LSA: old from %u (got %u <= have %u)\n",
-             origin, seq, lsaLastSeq[origin]);
          return;
       }
       lsaLastSeq[origin] = seq;
@@ -272,7 +270,6 @@ implementation{
       pack forward_packet;
       error_t e;
 
-      dbg(GENERAL_CHANNEL, "Packet Received\n");
       if (len != sizeof (pack)) {
          dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);
          return msg;
@@ -290,7 +287,6 @@ implementation{
          applyLSA(src, p->payload, PACKET_MAX_PAYLOAD_SIZE);
          if (ttl > 1) {
             pack fwd = *p; fwd.TTL = ttl - 1;
-            dbg(FLOODING_CHANNEL, "LSA FWD from %u ttl=%u\n", src, fwd.TTL);
             call Sender.send(fwd, AM_BROADCAST_ADDR);
          }
          return msg;
